@@ -319,6 +319,22 @@ def choice_answer_clean(pred: str):
     pred = pred.rstrip(".").rstrip("/")
     return pred
 
+def mmlu_pro_extract_answer(text):
+    pattern = r"answer is \(?([A-J])\)?"
+    match = re.search(pattern, text)
+    if match:
+        return match.group(1)
+    else:
+        # print("1st answer extract failed\n" + text)
+        match = re.search(r'.*[aA]nswer:\s*([A-J])', text)
+        if match:
+            return match.group(1)
+        else:
+            # print("2nd answer extract failed\n" + text)
+            pattern = r"\b[A-J]\b(?!.*\b[A-J]\b)"
+            match = re.search(pattern, text, re.DOTALL)
+            if match:
+                return match.group(0)
 
 def parse_digits(num):
     num = regex.sub(",", "", str(num))

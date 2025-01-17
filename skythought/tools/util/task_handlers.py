@@ -11,6 +11,7 @@ from multiprocessing import Manager
 from .apps.testing_util import run_test as apps_run_test
 from .taco.testing_util import run_test as taco_run_test
 from .math.testing_util import strip_answer_string, get_multiple_choice_answer, extract_answer, math_equal, mmlu_pro_extract_answer
+from .ifeval.testing_util import INSTRUCTION_DICT
 from .livecodebench.testing_util import unsafe_lcb_runTests, map_to_example, has_test_type, post_process_code, translate_private_test_cases
 
 def has_code(response):
@@ -309,6 +310,81 @@ class MMLUProTaskHandler(MMLUTaskHandler):
 
     def process_remaining_data(self, train_data, results):
         return [row.to_dict() for _, row in train_data.iterrows() if str(row["question"]) not in results]
+
+    def load_and_filter_dataset(self, start, end, split="test", source=None, filter_difficulty=False):
+        dataset = load_dataset(self.dataset, "default")
+        train_data = dataset[split].to_pandas()
+        return train_data.iloc[start:end] if end > 0 else train_data.iloc[start:]
+
+class IFEvalTaskHandler(TaskHandler):
+    def __init__(self):
+        super().__init__()
+        self.dataset = "google/IFEval"
+        import nltk
+        nltk.download('punkt_tab')
+        
+    @staticmethod
+    def generate_prompt(prompt):
+        return prompt
+
+    @staticmethod
+    def get_question_key():
+        return "prompt"
+
+    def check_correctness(self, problem, generation):
+        """Tests response to see if instrutions are followed."""
+        # response = prompt_to_response[inp.prompt]
+        instruction_list = problem["instruction_id_list"]
+        instruction_kwargs = problem["kwargs"]
+        instruction_kwargs = [{k: v for k, v in kwargs.items() if v is not None} for kwargs in instruction_kwargs]
+        is_following_list = []
+
+        for index, instruction_id in enumerate(instruction_list):
+            instruction_cls = INSTRUCTION_DICT[instruction_id]
+            instruction = instruction_cls(instruction_id)
+
+            instruction.build_description(**instruction_kwargs[index])
+            args = instruction.get_instruction_args()
+            if args and "prompt" in args:
+                instruction.build_description(prompt=problem["prompt"])
+
+            if generation.strip() and instruction.check_following(generation):
+                is_following_list.append(True)
+            else:
+                is_following_list.append(False)
+        return all(is_following_list)
+
+    def update_results(self, problem, response):
+        if not isinstance(response, str):
+            response = response.outputs[0].text.strip()
+        # Initialize the response structure
+        response_entry = {
+            "content": response,
+            "correctness": None,
+            "reason": None,
+        }
+        curr_res = self.check_correctness(problem, generation=response)
+        if curr_res:
+            response_entry["correctness"] = True
+            response_entry["reason"] = ""
+        else:
+            response_entry["correctness"] = False
+            response_entry["reason"] = "Solution is incorrect."
+        return response_entry
+    
+    
+    def make_conversations(self, data, system_prompt):
+        conversations = []
+        for problem in data:
+            prompt_text = self.generate_prompt(problem["prompt"])
+            conversations.append([
+                {"role": "system", "content": ""},
+                {"role": "user", "content": prompt_text}
+            ])
+        return conversations
+
+    def process_remaining_data(self, train_data, results):
+        return [row.to_dict() for _, row in train_data.iterrows() if str(row["prompt"]) not in results]
 
     def load_and_filter_dataset(self, start, end, split="test", source=None, filter_difficulty=False):
         dataset = load_dataset(self.dataset, "default")
@@ -693,5 +769,6 @@ TASK_HANDLERS = {
     "GPQADiamond": GPQADiamondTaskHandler,
     "MMLU": MMLUTaskHandler,
     "MMLUPro": MMLUProTaskHandler,
+    "IFEval": IFEvalTaskHandler,
     "LiveCodeBench": LiveCodeBenchTaskHandler
 }

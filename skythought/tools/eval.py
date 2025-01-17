@@ -19,6 +19,8 @@ def parse_arguments():
     parser.add_argument("--model", required=True, type=str, help="Path to the model.")
     parser.add_argument("--evals", required=True, type=str, help="Comma-separated list of evals to run (no spaces).")
     parser.add_argument("--tp", type=int, default=8, help="Tensor Parallelism Degree")
+    parser.add_argument("--pp", type=int, default=8, help="Pipeline Parallelism Degree")
+    parser.add_argument("--max_tokens", type=int, default=32768, help="Max tokens for the model.")
     parser.add_argument("--filter-difficulty", action="store_true", help="Filter difficulty.")
     parser.add_argument("--source", type=str, help="Source for the dataset.")
     parser.add_argument("--output_file", required=True, type=str, help="Output file to write results to.")
@@ -53,6 +55,7 @@ def main():
     evals = args.evals.split(",")
     output_file = args.output_file
     tp = args.tp
+    max_tokens = args.max_tokens
 
     script_path = "inference_and_check.py"
 
@@ -67,7 +70,8 @@ def main():
             "--model", model_path, 
             "--dataset", eval_name, 
             "--split", eval_to_split[eval_name], 
-            "--tp", str(tp)]
+            "--tp", str(tp),
+            "--max_tokens", str(max_tokens)]
         if args.filter_difficulty:
             assert args.source != "", "No source passed for filtering difficulty."
             command.append("--filter-difficulty")

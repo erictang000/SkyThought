@@ -10,6 +10,7 @@ eval_to_split = {
   "GPQADiamond": "train", 
   "MMLU": "test",
   "MMLUPro": "test",
+  "IFEval": "train",
   "LiveCodeBench": "test"
 }
 

@@ -157,6 +157,8 @@ def perform_check(handler: TaskHandler, temperatures, result_file, args):
     train_data = handler.load_and_filter_dataset(args.start, args.end, split=args.split, source=args.source, filter_difficulty=args.filter_difficulty)
     remaining_data = handler.process_remaining_data(train_data, {})
 
+    total_correct = 0
+    total_finish = 0
     tasks = []
     for item in remaining_data:
         problem_key = item[handler.get_question_key()]
@@ -168,12 +170,14 @@ def perform_check(handler: TaskHandler, temperatures, result_file, args):
                     if response_entry["correctness"] is None:
                         processed = "processed_content" in response_entry
                         tasks.append((item, temp, response_entry["processed_content"] if processed else response_entry["content"]))
+                    else:
+                        total_correct += int(response_entry["correctness"])
+                        total_finish += 1
 
     print(f"Found {len(tasks)} responses requiring reject sampling...")
 
-    total_correct = 0
-    total_finish = 0
-
+    total_reject_correct = 0
+    total_reject_finish = 0
     with ProcessPoolExecutor(max_workers=32) as executor:
         future_to_task = {
             executor.submit(handler.update_results, item, content): (item, temp)
@@ -184,8 +188,8 @@ def perform_check(handler: TaskHandler, temperatures, result_file, args):
         for future in tqdm(as_completed(future_to_task), total=len(future_to_task), desc="Processing Reject Sampling"):
             item, temp = future_to_task[future]
             new_response_entry = future.result()
-            total_correct += new_response_entry["correctness"]
-            total_finish += 1
+            total_reject_correct += new_response_entry["correctness"]
+            total_reject_finish += 1
 
             # Update the corresponding record in results
             problem_key = item[handler.get_question_key()]
@@ -195,7 +199,8 @@ def perform_check(handler: TaskHandler, temperatures, result_file, args):
             response_entry["reason"] = new_response_entry["reason"]
             results[problem_key]["responses"][str(temp)] = response_entry
 
-    print(f"Final reject-sampling accuracy: {total_correct}/{total_finish}")
+    print(f"Final reject-sampling accuracy: {total_reject_correct}/{total_reject_finish}")
+    print(f"Final accuracy: {total_correct + total_reject_correct}/{total_finish + total_reject_finish}")
 
     with open(result_file, 'w', encoding='utf-8') as file:
         json.dump(results, file, ensure_ascii=False, indent=4, cls=NumpyEncoder)
@@ -284,7 +289,7 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
 
 def main():
     parser = argparse.ArgumentParser(description="Unified inference and checking for different datasets/tasks.")
-    parser.add_argument("--dataset", type=str, required=True, choices=["NUMINA", "APPS", "TACO", "MATH500", "AIME", "GPQADiamond", "MMLU", "MMLUPro", "LiveCodeBench"], help="Dataset to process.")
+    parser.add_argument("--dataset", type=str, required=True, choices=["NUMINA", "APPS", "TACO", "MATH500", "AIME", "GPQADiamond", "MMLU", "MMLUPro", "IFEval", "LiveCodeBench"], help="Dataset to process.")
     parser.add_argument("--model", type=str, required=True, default="Qwen/QwQ-32B-Preview", help="The model to run.")
     parser.add_argument("--tp", type=int, default=8, help="Tensor Parallelism Degree")
     parser.add_argument("--max_tokens", type=int, default=32768, help="Max tokens for the model.")

@@ -840,16 +840,13 @@ class ARCChallengeTaskHandler(TaskHandler):
                 return self.invalid_ans
             return matches[-1].strip()
 
-class AMC23TaskHandler(AIMETaskHandler):
+class AMC23TaskHandler(MathTaskHandler):
     def __init__(self):
         self.dataset = "AI-MO/aimo-validation-amc"
-    
+
     @staticmethod
-    def generate_prompt(prompt, model):
-        if MODEL_TO_NAME[model] == "Sky-T1-32B-Preview":
-            return prompt + "\nReturn your final response within \\boxed{{}}"
-        else:
-            return "Return your final response within \\boxed{{}}. " + prompt
+    def get_question_key():
+        return "problem"
     
     def load_and_filter_dataset(self, start, end, split="train", source=None, filter_difficulty=False, args=None):
         dataset = load_dataset(self.dataset)

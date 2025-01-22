@@ -840,6 +840,93 @@ class ARCChallengeTaskHandler(TaskHandler):
                 return self.invalid_ans
             return matches[-1].strip()
 
+class ARCAGITaskTandler(TaskHandler):
+    def __init__(self):
+        self.dataset = "lordspline/arc-agi"
+
+    @staticmethod
+    def generate_prompt(prompt):
+        arc_prompt = """
+        You are participating in a puzzle solving competition. You are an expert at solving puzzles.\n 
+
+        Below is a list of input and output pairs with a pattern. Your goal is to identify the pattern or transformation in the training examples that maps the input to the output, then apply that pattern to the test input to give a final output.
+
+        Respond in the format of the training output examples
+
+        --Training Examples--
+        {training_examples}
+        --End of Training Examples--
+
+        --Test Input--
+        {test_input}
+        --End of Test Input--
+
+        Your response:
+        """
+        training_examples = ""
+        for i, pair in enumerate(prompt["train"]):
+            training_examples += f"--Example {i}-- \n\n INPUT: \n\n"
+            breakpoint()
+            training_examples += convert_2d_list_to_string(pair.input) + "\n\n"
+            training_examples += f"OUTPUT: \n\n"
+            training_examples += convert_2d_list_to_string(pair.output) + "\n\n"
+
+        test_input = convert_2d_list_to_string(test_input.input)
+        return arc_prompt.format(training_examples=training_examples, test_input=prompt["test"])
+
+    @staticmethod
+    def get_question_key():
+        return "question"
+
+    def check_correctness(self, problem, generation):
+        pred = get_multiple_choice_answer(generation)
+        abcd = "ABCD"
+        answer = abcd[problem["answer"]]
+        return answer == pred
+
+    def update_results(self, problem, response):
+        if not isinstance(response, str):
+            response = response.outputs[0].text.strip()
+        # Initialize the response structure
+        response_entry = {
+            "content": response,
+            "correctness": None,
+            "reason": None,
+        }
+        curr_res = self.check_correctness(problem, generation=response)
+        if curr_res:
+            response_entry["correctness"] = True
+            response_entry["reason"] = ""
+        else:
+            response_entry["correctness"] = False
+            response_entry["reason"] = "Solution is incorrect."
+        return response_entry
+    
+    def get_multiple_choice_answers(self, problem):
+        options = problem["choices"]
+        for i, (label, option) in enumerate(zip("ABCD", options)):
+            options[i] = f"({label}) {str(option).strip()}"
+        options = " ".join(options)
+        return f"Answer Choices: {options}"
+    
+    def make_conversations(self, data, system_prompt, model=None):
+        conversations = []
+        for problem in data:
+            multiple_choice_string = self.get_multiple_choice_answers(problem)
+            prompt_text = self.generate_prompt(problem["question"] + "\n" + multiple_choice_string)
+            conversations.append([
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt_text}
+            ])
+        return conversations
+
+    def process_remaining_data(self, train_data, results):
+        return [row.to_dict() for _, row in train_data.iterrows() if str(row["question"]) not in results]
+
+    def load_and_filter_dataset(self, start, end, split="test", source=None, filter_difficulty=False, args=None):
+        dataset = load_dataset(self.dataset, "all")
+        train_data = dataset[split].to_pandas()
+        return train_data.iloc[start:end] if end > 0 else train_data.iloc[start:]
 
 
 TASK_HANDLERS = {

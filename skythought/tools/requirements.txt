@@ -1,4 +1,6 @@
-vllm==0.6.2
+torch --index-url https://download.pytorch.org/whl/cu121
+torchvision --index-url https://download.pytorch.org/whl/cu121
+vllm==0.6.6
 pyext
 word2number
 scipy

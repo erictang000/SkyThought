@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from starlette.requests import Request
 from starlette.responses import StreamingResponse, JSONResponse
 
+import os
 from ray import serve
 
 from vllm.engine.arg_utils import AsyncEngineArgs
@@ -27,8 +28,8 @@ app = FastAPI()
 
 @serve.deployment(
     autoscaling_config={
-        "min_replicas": 1,
-        "max_replicas": 4,
+        "min_replicas": 24,
+        "max_replicas": 24,
         "target_ongoing_requests": 5,
     },
     max_ongoing_requests=10,
@@ -138,6 +139,9 @@ def build_app(cli_args: Dict[str, str]) -> serve.Application:
     pg_resources.append({"CPU": 1})  # for the deployment replica
     for i in range(tp):
         pg_resources.append({"CPU": 1, accelerator: 1})  # for the vLLM actors
+
+    # use os to enable hf_transfer for model download
+    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 
     # We use the "STRICT_PACK" strategy below to ensure all vLLM actors are placed on
     # the same Ray node.

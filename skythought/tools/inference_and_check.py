@@ -54,7 +54,7 @@ def fetch_all_responses_openai(llm, model_name, max_tokens, temp, conversations)
     errors = []
     
     with tqdm(total=len(conversations), desc="Processed Prompts", dynamic_ncols=True) as pbar:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=64) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=256) as executor:
             futures = {
                 executor.submit(safe_fetch_response, fetch_partial, conv): idx 
                 for idx, conv in enumerate(conversations)

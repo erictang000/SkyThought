@@ -27,13 +27,8 @@ app = FastAPI()
 
 
 @serve.deployment(
-    autoscaling_config={
-        "min_replicas": 24,
-        "max_replicas": 24,
-        "target_ongoing_requests": 5,
-    },
-    max_ongoing_requests=10,
-    num_replicas="auto",
+    max_ongoing_requests=100,
+    num_replicas=8,
 )
 @serve.ingress(app)
 class VLLMDeployment:

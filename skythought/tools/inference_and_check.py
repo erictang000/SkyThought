@@ -34,7 +34,7 @@ class EvalWorkload(ChatWorkloadBase):
     
 def load_rayllm_config(config_path: str) -> Dict[str, Any]:
     if isinstance(config_path, str):
-        config_path = Path(config)
+        config_path = Path(config_path)
         if not config_path.exists():
             raise FileNotFoundError(f"Engine config file {config} not found.")
         with open(config_path, "r") as filep:

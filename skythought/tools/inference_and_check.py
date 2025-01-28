@@ -9,7 +9,40 @@ from util.model_utils import *
 from openai import OpenAI
 import concurrent.futures
 from functools import partial
+from rayllm_batch import RayLLMBatch, init_engine_from_config
+from rayllm_batch.env_config import EnvConfig
+from rayllm_batch.workload import ChatWorkloadBase
+from pathlib import Path
+import yaml
 
+import ray
+from dataclasses import dataclass, field
+
+@dataclass
+class EvalWorkload(ChatWorkloadBase):
+    dataset_fraction: float = 1.0
+    sampling_params: Dict[str, Any] = field(
+        default_factory=lambda: {"max_tokens": 4096}
+    )
+
+    def parse_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """Parse each row in the dataset to make them compatible with
+        OpenAI chat API messages. Specifically, the output row should only
+        include a single key "messages" with type Dict[str, Union[str, List[Dict]]].      
+        """
+        return {"messages": row["item"][1], "index": row["item"][0]}
+    
+def load_rayllm_config(config_path: str) -> Dict[str, Any]:
+    if isinstance(config_path, str):
+        config_path = Path(config)
+        if not config_path.exists():
+            raise FileNotFoundError(f"Engine config file {config} not found.")
+        with open(config_path, "r") as filep:
+            config = yaml.safe_load(filep)
+
+    assert isinstance(config, dict)
+    return config
+    
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.ndarray):
@@ -50,8 +83,21 @@ def perform_inference_and_check(handler: TaskHandler, temperatures, max_tokens, 
     conversations = handler.make_conversations(remaining_data, system_prompt, args.model)
 
     for temp in temperatures:
-        
-        if args.model.startswith("openai"):
+        if len(conversations) == 0:
+            print("No more data to process")
+            continue
+        elif args.use_rayllm:
+            config = load_rayllm_config(args.rayllm_config)
+            engine_cfg = init_engine_from_config(config)
+            ds = ray.data.from_items([(idx, conv) for idx, conv in enumerate(conversations)])
+            workload = EvalWorkload(dataset=ds, sampling_params={"max_tokens": max_tokens, "temperature": temp})
+            batch = RayLLMBatch(
+                engine_cfg,
+                workload,
+                env_config=EnvConfig(**config["env_config"]),
+            )
+            responses = batch.run()
+        elif args.model.startswith("openai"):
             fetch_partial = partial(fetch_response_openai, llm, args.model, max_tokens, temp)
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=16) as e:
@@ -70,15 +116,23 @@ def perform_inference_and_check(handler: TaskHandler, temperatures, max_tokens, 
             # }
             future_to_task = {}
             token_usages = {}
-            for idx, response in enumerate(responses):
-                if args.model.startswith("openai"):
+            for idx, response in enumerate(responses if llm is not None else responses.iter_rows()):
+                if llm is None:
+                    idx = response["index"]
+                    response_str = response["generated_text"].strip()
+                elif args.model.startswith("openai"):
                     response_str = response.choices[0].message.content.strip()
                 else:
                     response_str = response.outputs[0].text.strip()
                 future_to_task[executor.submit(handler.update_results, remaining_data[idx], response_str)] = idx
                 # print(f"Request output: {response}")
                 
-                if args.model.startswith("openai"):
+                if llm is None:
+                    token_usages[idx] = {
+                        "completion_tokens": response["num_generated_tokens"],
+                        "prompt_tokens": response["num_input_tokens"]
+                    }
+                elif args.model.startswith("openai"):
                     token_usages[idx] = response.usage
                 else:
                     token_usages[idx] = {
@@ -321,6 +375,8 @@ def main():
     parser.add_argument("--math-difficulty-lower-bound", type=int, default=None, help="Lowest difficulty level for math.")
     parser.add_argument("--math-difficulty-upper-bound", type=int, default=None, help="Highest difficulty level for math.")
     parser.add_argument("--n", type=int, default=1, help="Number of samples generated per problem.")
+    parser.add_argument("--use_rayllm", action="store_true", help="Use RayLLM for inference.")
+    parser.add_argument("--rayllm_config", type=str, default="ray_configs/rayllm-config.yaml", help="RayLLM configuration file if using RayLLM.")
     args = parser.parse_args()
     
     handler: TaskHandler = TASK_HANDLERS[args.dataset]()
@@ -350,15 +406,16 @@ def main():
             result_file = converted_file
         perform_check(handler, temperatures, result_file, args)
         return
-    elif args.inference:
-        llm = OpenAI() if args.model.startswith("openai") else LLM(model=args.model, tensor_parallel_size=args.tp)
+    else:
+        if args.use_rayllm:
+            llm = None
+        else:
+            llm = OpenAI() if args.model.startswith("openai") else LLM(model=args.model, tensor_parallel_size=args.tp)
         system_prompt = SYSTEM_PROMPT[args.model]
-        perform_inference_and_save(handler, temperatures, max_tokens, result_file, llm, system_prompt, args)
-        return
-
-    llm = OpenAI() if args.model.startswith("openai") else LLM(model=args.model, tensor_parallel_size=args.tp)
-    system_prompt = SYSTEM_PROMPT[args.model]
-    perform_inference_and_check(handler, temperatures, max_tokens, result_file, llm, system_prompt, args)
+        if args.inference:
+            perform_inference_and_save(handler, temperatures, max_tokens, result_file, llm, system_prompt, args)
+        else:
+            perform_inference_and_check(handler, temperatures, max_tokens, result_file, llm, system_prompt, args)
 
 if __name__ == "__main__":
     main()

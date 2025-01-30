@@ -303,6 +303,7 @@ class MMLUProTaskHandler(MMLUTaskHandler):
         return f"Answer Choices: {options}"
 
     def load_and_filter_dataset(self, start, end, split="test", source=None, filter_difficulty=False, args=None):
+        end = 4000
         dataset = load_dataset(self.dataset, "default")
         train_data = dataset[split].to_pandas()
         return train_data.iloc[start:end] if end > 0 else train_data.iloc[start:]

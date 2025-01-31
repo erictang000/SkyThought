@@ -1,0 +1,3 @@
+[submodule "skythought/tools/rayllm_batch"]
+	path = skythought/tools/rayllm_batch
+	url = https://github.com/erictang000/rayllm_batch.git

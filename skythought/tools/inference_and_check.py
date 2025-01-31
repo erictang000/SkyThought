@@ -90,6 +90,8 @@ def perform_inference_and_check(handler: TaskHandler, temperatures, max_tokens, 
             config = load_rayllm_config(args.rayllm_config)
             engine_cfg = init_engine_from_config(config)
             ds = ray.data.from_items([(idx, conv) for idx, conv in enumerate(conversations)])
+            if config.get("num_replicas", 1) > 1 and config.get("num_replicas", 1) > ds.num_blocks():
+                ds = ds.repartition(num_partitions=config["num_replicas"])
             workload = EvalWorkload(dataset=ds, sampling_params={"max_tokens": max_tokens, "temperature": temp})
             batch = RayLLMBatch(
                 engine_cfg,

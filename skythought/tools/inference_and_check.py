@@ -11,37 +11,8 @@ import concurrent.futures
 from functools import partial
 from rayllm_batch import RayLLMBatch, init_engine_from_config
 from rayllm_batch.env_config import EnvConfig
-from rayllm_batch.workload import ChatWorkloadBase
-from pathlib import Path
-import yaml
-
+from rayllm_batch.workload import EvalWorkload, load_rayllm_config
 import ray
-from dataclasses import dataclass, field
-
-@dataclass
-class EvalWorkload(ChatWorkloadBase):
-    dataset_fraction: float = 1.0
-    sampling_params: Dict[str, Any] = field(
-        default_factory=lambda: {"max_tokens": 4096}
-    )
-
-    def parse_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
-        """Parse each row in the dataset to make them compatible with
-        OpenAI chat API messages. Specifically, the output row should only
-        include a single key "messages" with type Dict[str, Union[str, List[Dict]]].      
-        """
-        return {"messages": row["item"][1], "index": row["item"][0]}
-    
-def load_rayllm_config(config_path: str) -> Dict[str, Any]:
-    if isinstance(config_path, str):
-        config_path = Path(config_path)
-        if not config_path.exists():
-            raise FileNotFoundError(f"Engine config file {config} not found.")
-        with open(config_path, "r") as filep:
-            config = yaml.safe_load(filep)
-
-    assert isinstance(config, dict)
-    return config
     
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):

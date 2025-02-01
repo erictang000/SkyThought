@@ -1,7 +1,7 @@
 __all__ = []
 
 from .engines import init_engine_from_config
-from .main import Pipeline
+from .pipeline import Pipeline
 from .workload import (
     ChatWorkloadBase,
 )

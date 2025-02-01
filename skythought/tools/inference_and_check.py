@@ -243,6 +243,9 @@ def perform_check(handler: TaskHandler, temperatures, result_file, args):
     
 
 def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, result_file, llm, system_prompt, args):
+    if args.n > 1 and args.use_rayllm:
+        print("n > 1 not supported for now for use_rayllm!")
+        return
     results = handler.load_existing_results(result_file)
     print(f"Loaded {len(results)} existing results.")
     train_data = handler.load_and_filter_dataset(args.start, args.end, split=args.split, source=args.source, \
@@ -260,7 +263,7 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
             ds = ray.data.from_items([(idx, conv) for idx, conv in enumerate(conversations)])
             if config.get("num_replicas", 1) > 1 and config.get("num_replicas", 1) > ds.num_blocks():
                 ds = ds.repartition(num_partitions=config["num_replicas"])
-            workload = EvalWorkload(dataset=ds, sampling_params={"max_tokens": max_tokens, "temperature": temp})
+            workload = EvalWorkload(dataset=ds, sampling_params={"n": args.n, "max_tokens": max_tokens, "temperature": temp})
             batch = RayLLMBatch(
                 engine_cfg,
                 workload,
@@ -279,18 +282,29 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
 
         completion_tokens = []
         prompt_tokens = []
-        for idx, response in enumerate(responses if llm is not None else responses.iter_rows()):
+        for idx, response in enumerate(responses if not args.use_rayllm else responses.iter_rows()):
             response_entries = []
             token_usages = []
             completion_token = 0
             for sample_idx in range(args.n):
+                if args.use_rayllm:
+                    content = response["generated_text"].strip()
+                elif args.model.startswith("openai"):
+                    content = response.choices[0].message.content.strip()
+                else:
+                    content = response.outputs[sample_idx].text.strip()
                 response_entry = {
-                    "content": response.choices[0].message.content.strip() if args.model.startswith("openai") else response.outputs[sample_idx].text.strip(),
+                    "content": content,
                     "correctness": None,
                     "reason": None,
                 }
                 response_entries.append(response_entry)
-                if not args.model.startswith("openai"):
+                if args.use_rayllm:
+                    token_usages.append({
+                        "completion_tokens": response["num_generated_tokens"],
+                        "prompt_tokens": response["num_input_tokens"]
+                    })
+                elif not args.model.startswith("openai"):
                     token_usages.append({
                         "completion_tokens": len(response.outputs[sample_idx].token_ids),
                         "prompt_tokens": len(response.prompt_token_ids)

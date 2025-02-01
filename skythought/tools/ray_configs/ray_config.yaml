@@ -1,4 +1,3 @@
-model_id: NovaSky-AI/Sky-T1-32B-Preview # vllm model id 
 llm_engine: vllm # currently only vllm supported
 accelerator_type: A100-80G  # accelerator name as specified here: https://docs.ray.io/en/master/ray-core/accelerator-types.html#accelerator-types
 engine_kwargs: # vllm engine kwargs 

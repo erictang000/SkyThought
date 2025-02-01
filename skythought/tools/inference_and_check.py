@@ -59,6 +59,7 @@ def perform_inference_and_check(handler: TaskHandler, temperatures, max_tokens, 
             continue
         elif args.use_rayllm:
             config = load_rayllm_config(args.rayllm_config)
+            config["model_id"] = args.model
             engine_cfg = init_engine_from_config(config)
             ds = ray.data.from_items([(idx, conv) for idx, conv in enumerate(conversations)])
             if config.get("num_replicas", 1) > 1 and config.get("num_replicas", 1) > ds.num_blocks():
@@ -256,6 +257,7 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
             continue
         elif args.use_rayllm:
             config = load_rayllm_config(args.rayllm_config)
+            config["model_id"] = args.model
             engine_cfg = init_engine_from_config(config)
             ds = ray.data.from_items([(idx, conv) for idx, conv in enumerate(conversations)])
             if config.get("num_replicas", 1) > 1 and config.get("num_replicas", 1) > ds.num_blocks():
@@ -372,6 +374,9 @@ def main():
     
     handler: TaskHandler = TASK_HANDLERS[args.dataset]()
     temperatures = [1] if args.model.startswith("openai/o1") else args.temperatures 
+
+    # use os to enable hf_transfer for model download
+    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
     
     print(f"Temperature: {temperatures}")
     max_tokens = args.max_tokens

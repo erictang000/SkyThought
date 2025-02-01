@@ -312,8 +312,9 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
                         "prompt_tokens": len(response.prompt_token_ids)
                     })
                     completion_token += len(response.outputs[sample_idx].token_ids)
+
             completion_token /= args.n
-            prompt_token = len(response.prompt_token_ids)
+            prompt_token = len(response.prompt_token_ids if not args.use_rayllm else response["prompt_token_ids"])
             prompt_tokens.append(prompt_token)
             completion_tokens.append(completion_token)
 

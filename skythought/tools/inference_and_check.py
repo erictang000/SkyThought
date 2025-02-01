@@ -90,7 +90,7 @@ def perform_inference_and_check(handler: TaskHandler, temperatures, max_tokens, 
             future_to_task = {}
             token_usages = {}
             for idx, response in enumerate(responses if llm is not None else responses.iter_rows()):
-                if llm is None:
+                if args.use_rayllm:
                     idx = response["index"]
                     response_str = response["generated_text"].strip()
                 elif args.model.startswith("openai"):
@@ -100,7 +100,7 @@ def perform_inference_and_check(handler: TaskHandler, temperatures, max_tokens, 
                 future_to_task[executor.submit(handler.update_results, remaining_data[idx], response_str)] = idx
                 # print(f"Request output: {response}")
                 
-                if llm is None:
+                if args.use_rayllm:
                     token_usages[idx] = {
                         "completion_tokens": response["num_generated_tokens"],
                         "prompt_tokens": response["num_input_tokens"]
@@ -251,7 +251,23 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
     conversations = handler.make_conversations(remaining_data, system_prompt, args.model)
     
     for temp in temperatures:
-        if args.model.startswith("openai"):
+        if len(conversations) == 0:
+            print("No more data to process")
+            continue
+        elif args.use_rayllm:
+            config = load_rayllm_config(args.rayllm_config)
+            engine_cfg = init_engine_from_config(config)
+            ds = ray.data.from_items([(idx, conv) for idx, conv in enumerate(conversations)])
+            if config.get("num_replicas", 1) > 1 and config.get("num_replicas", 1) > ds.num_blocks():
+                ds = ds.repartition(num_partitions=config["num_replicas"])
+            workload = EvalWorkload(dataset=ds, sampling_params={"max_tokens": max_tokens, "temperature": temp})
+            batch = RayLLMBatch(
+                engine_cfg,
+                workload,
+                env_config=EnvConfig(**config["env_config"]),
+            )
+            responses = batch.run()
+        elif args.model.startswith("openai"):
             fetch_partial = partial(fetch_response_openai, llm, args.model, max_tokens, temp)
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=16) as e:
@@ -263,7 +279,7 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
 
         completion_tokens = []
         prompt_tokens = []
-        for idx, response in enumerate(responses):
+        for idx, response in enumerate(responses if llm is not None else responses.iter_rows()):
             response_entries = []
             token_usages = []
             completion_token = 0
@@ -285,6 +301,8 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
             prompt_tokens.append(prompt_token)
             completion_tokens.append(completion_token)
 
+            if args.use_rayllm:
+                idx = response["index"] # rayllm path doesn't get sorted responses so we need to grab index
             problem_key = remaining_data[idx][handler.get_question_key()] # can you use this idx
             if problem_key not in results:
                 results[problem_key] = remaining_data[idx]

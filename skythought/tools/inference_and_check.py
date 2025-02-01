@@ -9,9 +9,9 @@ from util.model_utils import *
 from openai import OpenAI
 import concurrent.futures
 from functools import partial
-from rayllm_batch import RayLLMBatch, init_engine_from_config
-from rayllm_batch.env_config import EnvConfig
-from rayllm_batch.workload import EvalWorkload, load_rayllm_config
+from batch import Pipeline, init_engine_from_config
+from batch.env_config import EnvConfig
+from batch.workload import EvalWorkload, load_config_from_path
 import ray
     
 class NumpyEncoder(json.JSONEncoder):
@@ -57,20 +57,20 @@ def perform_inference_and_check(handler: TaskHandler, temperatures, max_tokens, 
         if len(conversations) == 0:
             print("No more data to process")
             continue
-        elif args.use_rayllm:
-            config = load_rayllm_config(args.rayllm_config)
+        elif args.use_ray:
+            config = load_config_from_path(args.ray_config)
             config["model_id"] = args.model
             engine_cfg = init_engine_from_config(config)
             ds = ray.data.from_items([(idx, conv) for idx, conv in enumerate(conversations)])
             if config.get("num_replicas", 1) > 1 and config.get("num_replicas", 1) > ds.num_blocks():
                 ds = ds.repartition(num_partitions=config["num_replicas"])
-            workload = EvalWorkload(dataset=ds, sampling_params={"max_tokens": max_tokens, "temperature": temp})
-            batch = RayLLMBatch(
+            ds = EvalWorkload(dataset=ds, sampling_params={"n": args.n, "max_tokens": max_tokens, "temperature": temp})
+            pipeline = Pipeline(
                 engine_cfg,
-                workload,
                 env_config=EnvConfig(**config["env_config"]),
             )
-            responses = batch.run()
+            ds = pipeline(ds)
+            responses = ds.materialize()
         elif args.model.startswith("openai"):
             fetch_partial = partial(fetch_response_openai, llm, args.model, max_tokens, temp)
 
@@ -91,7 +91,7 @@ def perform_inference_and_check(handler: TaskHandler, temperatures, max_tokens, 
             future_to_task = {}
             token_usages = {}
             for idx, response in enumerate(responses if llm is not None else responses.iter_rows()):
-                if args.use_rayllm:
+                if args.use_ray:
                     idx = response["index"]
                     response_str = response["generated_text"].strip()
                 elif args.model.startswith("openai"):
@@ -101,7 +101,7 @@ def perform_inference_and_check(handler: TaskHandler, temperatures, max_tokens, 
                 future_to_task[executor.submit(handler.update_results, remaining_data[idx], response_str)] = idx
                 # print(f"Request output: {response}")
                 
-                if args.use_rayllm:
+                if args.use_ray:
                     token_usages[idx] = {
                         "completion_tokens": response["num_generated_tokens"],
                         "prompt_tokens": response["num_input_tokens"]
@@ -244,8 +244,8 @@ def perform_check(handler: TaskHandler, temperatures, result_file, args):
     
 
 def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, result_file, llm, system_prompt, args):
-    if args.n > 1 and args.use_rayllm:
-        print("n > 1 not supported for now for use_rayllm!")
+    if args.n > 1 and args.use_ray:
+        print("n > 1 not supported for now for use_ray!")
         return
     results = handler.load_existing_results(result_file)
     print(f"Loaded {len(results)} existing results.")
@@ -258,20 +258,20 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
         if len(conversations) == 0:
             print("No more data to process")
             continue
-        elif args.use_rayllm:
-            config = load_rayllm_config(args.rayllm_config)
+        elif args.use_ray:
+            config = load_config_from_path(args.ray_config)
             config["model_id"] = args.model
             engine_cfg = init_engine_from_config(config)
             ds = ray.data.from_items([(idx, conv) for idx, conv in enumerate(conversations)])
             if config.get("num_replicas", 1) > 1 and config.get("num_replicas", 1) > ds.num_blocks():
                 ds = ds.repartition(num_partitions=config["num_replicas"])
-            workload = EvalWorkload(dataset=ds, sampling_params={"n": args.n, "max_tokens": max_tokens, "temperature": temp})
-            batch = RayLLMBatch(
+            ds = EvalWorkload(dataset=ds, sampling_params={"n": args.n, "max_tokens": max_tokens, "temperature": temp})
+            pipeline = Pipeline(
                 engine_cfg,
-                workload,
                 env_config=EnvConfig(**config["env_config"]),
             )
-            responses = batch.run()
+            ds = pipeline(ds)
+            responses = ds.materialize()
         elif args.model.startswith("openai"):
             fetch_partial = partial(fetch_response_openai, llm, args.model, max_tokens, temp)
 
@@ -284,12 +284,12 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
 
         completion_tokens = []
         prompt_tokens = []
-        for idx, response in enumerate(responses if not args.use_rayllm else responses.iter_rows()):
+        for idx, response in enumerate(responses if not args.use_ray else responses.iter_rows()):
             response_entries = []
             token_usages = []
             completion_token = 0
             for sample_idx in range(args.n):
-                if args.use_rayllm:
+                if args.use_ray:
                     content = response["generated_text"].strip()
                 elif args.model.startswith("openai"):
                     content = response.choices[0].message.content.strip()
@@ -301,7 +301,7 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
                     "reason": None,
                 }
                 response_entries.append(response_entry)
-                if args.use_rayllm:
+                if args.use_ray:
                     token_usages.append({
                         "completion_tokens": response["num_generated_tokens"],
                         "prompt_tokens": response["num_input_tokens"]
@@ -314,12 +314,12 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
                     completion_token += len(response.outputs[sample_idx].token_ids)
 
             completion_token /= args.n
-            prompt_token = len(response.prompt_token_ids if not args.use_rayllm else response["prompt_token_ids"])
+            prompt_token = len(response.prompt_token_ids if not args.use_ray else response["prompt_token_ids"])
             prompt_tokens.append(prompt_token)
             completion_tokens.append(completion_token)
 
-            if args.use_rayllm:
-                idx = response["index"] # rayllm path doesn't get sorted responses so we need to grab index
+            if args.use_ray:
+                idx = response["index"] # ray code path doesn't get sorted responses so we need to grab index
             problem_key = remaining_data[idx][handler.get_question_key()] # can you use this idx
             if problem_key not in results:
                 results[problem_key] = remaining_data[idx]
@@ -383,8 +383,8 @@ def main():
     parser.add_argument("--math-difficulty-lower-bound", type=int, default=None, help="Lowest difficulty level for math.")
     parser.add_argument("--math-difficulty-upper-bound", type=int, default=None, help="Highest difficulty level for math.")
     parser.add_argument("--n", type=int, default=1, help="Number of samples generated per problem.")
-    parser.add_argument("--use_rayllm", action="store_true", help="Use RayLLM for inference.")
-    parser.add_argument("--rayllm_config", type=str, default="ray_configs/rayllm-config.yaml", help="RayLLM configuration file if using RayLLM.")
+    parser.add_argument("--use_ray", action="store_true", help="Use ray for scaling inference.")
+    parser.add_argument("--ray_config", type=str, default="ray_configs/ray_config.yaml", help="Ray configuration file if using ray for scaling inference.")
     args = parser.parse_args()
     
     handler: TaskHandler = TASK_HANDLERS[args.dataset]()
@@ -418,7 +418,7 @@ def main():
         perform_check(handler, temperatures, result_file, args)
         return
     else:
-        if args.use_rayllm:
+        if args.use_ray:
             llm = None
         else:
             llm = OpenAI() if args.model.startswith("openai") else LLM(model=args.model, tensor_parallel_size=args.tp)

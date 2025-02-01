@@ -21,4 +21,4 @@ runtime_env:
     VLLM_ATTENTION_BACKEND: "FLASH_ATTN"
 env_config:
   num_replicas: 2 # number of vllm replicas 
-  batch_size: 128 # rayllm-batch internal batch size (used for map_batches call internally). Should usually be set to a value in [64, 128, 256] for best performance.
+  batch_size: 128 # ray pipeline internal batch size (used for map_batches call internally). Should usually be set to a value in [64, 128, 256] for best performance.

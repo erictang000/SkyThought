@@ -148,9 +148,18 @@ class Detokenizer:
         """
         start_t = time.perf_counter()
         generated_tokens = batch["generated_tokens"]
+        flattened = False
+        # if the generated tokens are nested lists, flatten them
+        if isinstance(generated_tokens[0][0], np.ndarray):
+            # flatten the lists of lists for detokenization
+            flattened = True
+            generated_tokens = [token for tokens in generated_tokens for token in tokens] # flattens list
         generated_text = self.tokenizer.batch_decode(
             generated_tokens, skip_special_tokens=True
         )
+        if flattened:
+            # unflatten the list of lists
+            generated_text = [generated_text[i : i + len(tokens)] for i, tokens in enumerate(batch["generated_tokens"])]
         time_taken_detokenizer = time.perf_counter() - start_t
         yield {
             **batch,

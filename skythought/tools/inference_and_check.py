@@ -244,9 +244,9 @@ def perform_check(handler: TaskHandler, temperatures, result_file, args):
     
 
 def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, result_file, llm, system_prompt, args):
-    if args.n > 1 and args.use_ray:
-        print("n > 1 not supported for now for use_ray!")
-        return
+    # if args.n > 1 and args.use_ray:
+    #     print("n > 1 not supported for now for use_ray!")
+    #     return
     results = handler.load_existing_results(result_file)
     print(f"Loaded {len(results)} existing results.")
     train_data = handler.load_and_filter_dataset(args.start, args.end, split=args.split, source=args.source, \
@@ -290,7 +290,8 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
             completion_token = 0
             for sample_idx in range(args.n):
                 if args.use_ray:
-                    content = response["generated_text"].strip()
+                    text = response["generated_text"]
+                    content = text[sample_idx].strip() if isinstance(text, list) else text.strip()
                 elif args.model.startswith("openai"):
                     content = response.choices[0].message.content.strip()
                 else:
@@ -302,9 +303,10 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
                 }
                 response_entries.append(response_entry)
                 if args.use_ray:
+                    num_gen_tokens = response["num_generated_tokens"]
                     token_usages.append({
-                        "completion_tokens": response["num_generated_tokens"],
-                        "prompt_tokens": response["num_input_tokens"]
+                        "completion_tokens": int(num_gen_tokens[sample_idx]) if isinstance(num_gen_tokens, list) else int(num_gen_tokens),
+                        "prompt_tokens": int(response["num_input_tokens"])
                     })
                 elif not args.model.startswith("openai"):
                     token_usages.append({

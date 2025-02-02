@@ -348,10 +348,12 @@ class AsyncLLMPredictor(EngineBase):
                 metrics = {
                     k: [v] for k, v in dataclasses.asdict(output.metrics).items()
                 }
+            generated_tokens = [output.outputs[i].token_ids for i in range(len(output.outputs))]
+            num_generated_tokens = [len(output.outputs[i].token_ids) for i in range(len(output.outputs))]
             output_data.update(
                 {
-                    "generated_tokens": [output.outputs[0].token_ids],
-                    "num_generated_tokens": [len(output.outputs[0].token_ids)],
+                    "generated_tokens": [generated_tokens] if len(generated_tokens) > 1 else generated_tokens,
+                    "num_generated_tokens": [num_generated_tokens] if len(num_generated_tokens) > 1 else num_generated_tokens,
                     **metrics,
                 }
             )

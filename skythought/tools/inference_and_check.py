@@ -288,7 +288,7 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
             for sample_idx in range(args.n):
                 if args.use_ray:
                     text = response["generated_text"]
-                    content = text[sample_idx].strip() if isinstance(text, list) else text.strip()
+                    content = text[sample_idx].strip() if not isinstance(text, str) else text.strip()
                 elif args.model.startswith("openai"):
                     content = response.choices[0].message.content.strip()
                 else:
@@ -302,8 +302,8 @@ def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, r
                 if args.use_ray:
                     num_gen_tokens = response["num_generated_tokens"]
                     token_usages.append({
-                        "completion_tokens": int(num_gen_tokens[sample_idx]) if isinstance(num_gen_tokens, list) else int(num_gen_tokens),
-                        "prompt_tokens": int(response["num_input_tokens"])
+                        "completion_tokens": int(num_gen_tokens[sample_idx]) if not isinstance(num_gen_tokens, int) else num_gen_tokens,
+                        "prompt_tokens": response["num_input_tokens"]
                     })
                 elif not args.model.startswith("openai"):
                     token_usages.append({

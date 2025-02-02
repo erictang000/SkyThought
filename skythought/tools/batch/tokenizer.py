@@ -158,8 +158,14 @@ class Detokenizer:
             generated_tokens, skip_special_tokens=True
         )
         if flattened:
-            # unflatten the list of lists
-            generated_text = [generated_text[i : i + len(tokens)] for i, tokens in enumerate(batch["generated_tokens"])]
+            # unflatten the list back to original structure
+            curr_idx = 0
+            generated_text_unflattened = []
+            for sublist in batch["generated_tokens"]:
+                sublist_len = len(sublist)
+                generated_text_unflattened.append(generated_text[curr_idx:curr_idx + sublist_len])
+                curr_idx += sublist_len
+            generated_text = generated_text_unflattened
         time_taken_detokenizer = time.perf_counter() - start_t
         yield {
             **batch,

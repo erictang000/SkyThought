@@ -244,9 +244,6 @@ def perform_check(handler: TaskHandler, temperatures, result_file, args):
     
 
 def perform_inference_and_save(handler: TaskHandler, temperatures, max_tokens, result_file, llm, system_prompt, args):
-    # if args.n > 1 and args.use_ray:
-    #     print("n > 1 not supported for now for use_ray!")
-    #     return
     results = handler.load_existing_results(result_file)
     print(f"Loaded {len(results)} existing results.")
     train_data = handler.load_and_filter_dataset(args.start, args.end, split=args.split, source=args.source, \

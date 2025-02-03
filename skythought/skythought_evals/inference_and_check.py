@@ -8,6 +8,7 @@ from batch import Pipeline, init_engine_from_config
 from batch.env_config import EnvConfig
 from batch.workload import EvalWorkload, load_config_from_path
 import ray
+import math
 import numpy as np
 from openai import OpenAI
 from skythought_evals.tasks import (
@@ -91,7 +92,7 @@ def perform_inference_and_check(
             config["model_id"] = args.model
             engine_cfg = init_engine_from_config(config)
             ds = ray.data.from_items([(idx, conv) for idx, conv in enumerate(conversations)])
-            if config.get("num_replicas", 1) > 1 and config.get("num_replicas", 1) > ds.num_blocks():
+            if config["env_config"].get("num_replicas", 1) > 1 and config["env_config"].get("num_replicas", 1) > ds.num_blocks():
                 ds = ds.repartition(num_partitions=config["num_replicas"])
             ds = EvalWorkload(dataset=ds, sampling_params={"n": args.n, "max_tokens": max_tokens, "temperature": temp})
             pipeline = Pipeline(
@@ -360,8 +361,11 @@ def perform_inference_and_save(
             config["model_id"] = args.model
             engine_cfg = init_engine_from_config(config)
             ds = ray.data.from_items([(idx, conv) for idx, conv in enumerate(conversations)])
-            if config.get("num_replicas", 1) > 1 and config.get("num_replicas", 1) > ds.num_blocks():
-                ds = ds.repartition(num_partitions=config["num_replicas"])
+            num_replicas = config["env_config"].get("num_replicas", 1)
+            if ds.count() < config["env_config"].get("batch_size", 1):
+                config["env_config"]["batch_size"] = math.ceil(ds.count() / num_replicas)
+            if num_replicas > 1 and num_replicas > ds.num_blocks():
+                ds = ds.repartition(num_partitions=num_replicas)
             ds = EvalWorkload(dataset=ds, sampling_params={"n": args.n, "max_tokens": max_tokens, "temperature": temp})
             pipeline = Pipeline(
                 engine_cfg,
@@ -633,6 +637,9 @@ def main():
         return
     else:
         if args.use_ray:
+            # disable pyarrow warnings
+            data_ctx = ray.data.DataContext.get_current()
+            data_ctx.enable_fallback_to_arrow_object_ext_type=True
             llm = None
         else:
             llm = OpenAI() if args.model.startswith("openai") else LLM(model=args.model, tensor_parallel_size=args.tp)

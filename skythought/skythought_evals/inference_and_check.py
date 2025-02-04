@@ -1,7 +1,9 @@
 import argparse
 import concurrent.futures
 import json
+import math
 import os
+from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 
@@ -249,7 +251,7 @@ def perform_check(handler: TaskHandler, temperatures, result_file, args):
 
     total_correct = 0
     total_finish = 0
-    correct = {temp: {} for temp in temperatures}
+    correct = {temp: defaultdict(list) for temp in temperatures}
     with ProcessPoolExecutor(max_workers=32) as executor:
         future_to_task = {
             executor.submit(handler.update_results, item, content): (
@@ -272,11 +274,8 @@ def perform_check(handler: TaskHandler, temperatures, result_file, args):
             total_finish += 1
 
             # Update the corresponding record in results
-            problem_key = item[handler.get_question_key()]
-            if problem_key not in correct[temp]:
-                correct[temp][problem_key] = False
-            if new_response_entry["correctness"]:
-                correct[temp][problem_key] = True
+            problem_key = item[handler.question_key]
+            correct[temp][problem_key].append(new_response_entry["correctness"])
             assert (
                 problem_key in results
                 and "responses" in results[problem_key]
@@ -290,7 +289,32 @@ def perform_check(handler: TaskHandler, temperatures, result_file, args):
     print(f"Final reject-sampling accuracy: {total_correct}/{total_finish}")
     # per temperature acc
     for temp in temperatures:
-        temp_correct = sum(correct[temp].values())
+        # pass at k per temperature
+        scores = list(correct[temp].values())
+        num_scores = len(scores[0])
+        N = num_scores
+        k = num_scores
+
+        actual_accuracy = sum([sum(sample) for sample in scores]) / (
+            len(scores) * num_scores
+        )
+        print(f"Actual accuracy: {actual_accuracy}")
+        final_bon_scores = {}
+
+        while k > 0:
+            new_scores = []
+            for sample in scores:
+                # calculate pass @ k
+                num_correct = np.sum(sample)
+                pass_k = 1 - (math.comb(N - num_correct, k) / math.comb(N, k))
+                new_scores.append(pass_k)
+            final_bon_scores[k] = round(np.mean(new_scores) * 100, 3)
+            k = k // 2
+
+        print("Final pass @ k:")
+        for k, s in final_bon_scores.items():
+            print(f"k: {k}, pass @ k: {s}")
+        temp_correct = sum([any(x) for x in scores])
         temp_total = len(correct[temp])
         temp_acc = round(temp_correct / temp_total, 4) if temp_total > 0 else 0
         print(f"Temperature {temp} acc: {temp_correct}/{temp_total} ({temp_acc})")

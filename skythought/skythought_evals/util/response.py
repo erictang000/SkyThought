@@ -27,7 +27,7 @@ class Response:
                 for i in range(len(response["num_generated_tokens"]))
             ]
         else:
-            num_completion_tokens = int(response["generated_text"])
+            num_completion_tokens = int(response["num_generated_tokens"])
         return cls(
             response=response["generated_text"],
             num_completion_tokens=num_completion_tokens,

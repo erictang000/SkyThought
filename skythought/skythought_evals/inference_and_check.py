@@ -539,7 +539,8 @@ def main():
     set_seed(args.seed)
 
     # use os to enable hf_transfer for model download
-    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+    if not os.environ.get("HF_HUB_ENABLE_HF_TRANSFER", None) in ["1", "True"]:
+        os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 
     if args.task not in TASK_NAMES_TO_YAML:
         raise ValueError(

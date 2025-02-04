@@ -1,22 +1,18 @@
 """Utility functions"""
+
 import os
 import subprocess
 import time
 from functools import wraps
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    List,
-    Optional,
-    Dict
-)
-import ray
+from typing import Any, Callable, Dict, List, Optional
+
 import pyarrow
+import ray
 from filelock import FileLock
 from huggingface_hub import snapshot_download
-from ray.data import Dataset
 from pynvml import nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo, nvmlInit  # type: ignore
+from ray.data import Dataset
 
 from .logging import get_logger
 
@@ -28,6 +24,7 @@ logger = get_logger(__name__)
 # we will fallback to FALLBACK_LOCAL_MODEL_ROOT.
 DEFAULT_LOCAL_MODEL_ROOT = "/mnt/local_storage/cache"
 FALLBACK_LOCAL_MODEL_ROOT = "/tmp/cache"
+
 
 def update_dict_recursive(
     orig: Dict[str, Any], update_dict: Dict[str, Any]
@@ -47,6 +44,7 @@ def update_dict_recursive(
         else:
             orig[key] = value
     return orig
+
 
 def wait_for_gpu_memory_to_clear(threshold_bytes: int, timeout_s: float = 120) -> None:
     """Wait for GPU memory to be below a threshold.
@@ -94,6 +92,7 @@ def wait_for_gpu_memory_to_clear(threshold_bytes: int, timeout_s: float = 120) -
 
         time.sleep(5)
 
+
 def run_s3_command(command: List[str], error_msg: Optional[str] = None) -> Any:
     """Run a S3 command and raise an exception if it fails.
 
@@ -126,6 +125,7 @@ def run_s3_command(command: List[str], error_msg: Optional[str] = None) -> Any:
             )
         raise
 
+
 def download_hf_model_from_s3(s3_path: str, local_path_root: str) -> str:
     """Download model files from s3 to the local path. The model path prefix
     will be added to the local path.
@@ -155,6 +155,7 @@ def download_hf_model_from_s3(s3_path: str, local_path_root: str) -> str:
     with FileLock(local_path / ".lock", timeout=-1):
         run_s3_command(command, f"Failed to sync model from {s3_path} to {local_path}")
     return str(local_path)
+
 
 def maybe_download_model_from_s3(
     model_path: str, local_path_root: Optional[str] = None
@@ -190,6 +191,7 @@ def maybe_download_model_from_s3(
         local_root.mkdir(parents=True, exist_ok=True)
 
     return download_hf_model_from_s3(s3_path, local_root)
+
 
 def download_model_from_hf(
     model_name: str, local_path_root: Optional[str] = None
@@ -228,6 +230,7 @@ def download_model_from_hf(
 
     return str(local_model_path)
 
+
 def async_caller_empty_batch_handler(func) -> Callable:
     """A decorator to handle the case where all rows are checkpointed.
     When all rows are checkpointed, we will still get a batch
@@ -251,6 +254,7 @@ def async_caller_empty_batch_handler(func) -> Callable:
             yield {}
 
     return wrapper
+
 
 def has_materialized(ds: Dataset) -> bool:
     """Check if the dataset has been materialized.

@@ -1,4 +1,5 @@
 """Tokenizer and detokenizer for LLMs."""
+
 import time
 from typing import Any, AsyncGenerator, Dict, Union
 
@@ -72,6 +73,7 @@ def get_cached_tokenizer(tokenizer: AnyTokenizer) -> AnyTokenizer:
     tokenizer.__class__ = CachedTokenizer
     return tokenizer
 
+
 class ChatTemplateTokenizer:
     """Tokenizer with chat template applied.
 
@@ -113,7 +115,6 @@ class ChatTemplateTokenizer:
         tokens = self.tokenizer(full_prompts)["input_ids"]
         time_taken_tokenizer = time.perf_counter() - start_t
 
-
         ret = {
             **batch,
             "prompt": full_prompts,
@@ -123,6 +124,7 @@ class ChatTemplateTokenizer:
         }
 
         yield ret
+
 
 class Detokenizer:
     """Detokenizer for LLMs.
@@ -153,7 +155,9 @@ class Detokenizer:
         if isinstance(generated_tokens[0][0], np.ndarray):
             # flatten the lists of lists for detokenization
             flattened = True
-            generated_tokens = [token for tokens in generated_tokens for token in tokens] # flattens list
+            generated_tokens = [
+                token for tokens in generated_tokens for token in tokens
+            ]  # flattens list
         generated_text = self.tokenizer.batch_decode(
             generated_tokens, skip_special_tokens=True
         )
@@ -163,7 +167,9 @@ class Detokenizer:
             generated_text_unflattened = []
             for sublist in batch["generated_tokens"]:
                 sublist_len = len(sublist)
-                generated_text_unflattened.append(generated_text[curr_idx:curr_idx + sublist_len])
+                generated_text_unflattened.append(
+                    generated_text[curr_idx : curr_idx + sublist_len]
+                )
                 curr_idx += sublist_len
             generated_text = generated_text_unflattened
         time_taken_detokenizer = time.perf_counter() - start_t

@@ -1,15 +1,16 @@
 import argparse
 import concurrent.futures
 import json
+import math
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
+
+import numpy as np
+import ray
 from batch import Pipeline, init_engine_from_config
 from batch.env_config import EnvConfig
 from batch.workload import EvalWorkload, load_config_from_path
-import ray
-import math
-import numpy as np
 from openai import OpenAI
 from skythought_evals.tasks import (
     TASK_HANDLER_MAP,
@@ -20,6 +21,7 @@ from skythought_evals.tasks import (
 from skythought_evals.tasks.task_util import get_tasks
 from skythought_evals.util.common import set_seed
 from skythought_evals.util.model_utils import MODEL_TO_NAME, SYSTEM_PROMPT
+from skythought_evals.util.response import Response
 from tqdm import tqdm
 from vllm import LLM, SamplingParams
 
@@ -60,6 +62,55 @@ def fetch_response_openai(llm, model_name, max_tokens, temp, prompt):
     return response
 
 
+def fetch_responses_ray(conversations, max_tokens, temp, args):
+    config = load_config_from_path(args.ray_config)
+    config["model_id"] = args.model
+    engine_cfg = init_engine_from_config(config)
+    ds = ray.data.from_items([(idx, conv) for idx, conv in enumerate(conversations)])
+    num_replicas = config["env_config"].get("num_replicas", 1)
+    if ds.count() < config["env_config"].get("batch_size", 1):
+        config["env_config"]["batch_size"] = math.ceil(ds.count() / num_replicas)
+    if num_replicas > 1 and num_replicas > ds.num_blocks():
+        ds = ds.repartition(num_partitions=num_replicas)
+    ds = EvalWorkload(
+        dataset=ds,
+        sampling_params={"n": args.n, "max_tokens": max_tokens, "temperature": temp},
+    )
+    pipeline = Pipeline(
+        engine_cfg,
+        env_config=EnvConfig(**config["env_config"]),
+    )
+    ds = pipeline(ds)
+    responses = ds.materialize()
+    return responses
+
+
+def inference(llm, conversations, max_tokens, temp, args):
+    if args.use_ray:
+        responses = fetch_responses_ray(conversations, max_tokens, temp, args)
+        responses = [
+            Response.from_ray_response(response) for response in responses.iter_rows()
+        ]
+        responses = sorted(responses, key=lambda x: x.index)
+    elif args.model.startswith("openai"):
+        fetch_partial = partial(
+            fetch_response_openai, llm, args.model, max_tokens, temp
+        )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as e:
+            responses = list(e.map(fetch_partial, conversations))
+
+        responses = [Response.from_openai_response(response) for response in responses]
+    else:
+        sampling_params = SamplingParams(max_tokens=max_tokens, temperature=temp)
+        responses = llm.chat(
+            messages=conversations, sampling_params=sampling_params, use_tqdm=True
+        )
+        responses = [Response.from_vllm_response(response) for response in responses]
+
+    return responses
+
+
 def perform_inference_and_check(
     handler: TaskHandler,
     temperatures,
@@ -69,6 +120,7 @@ def perform_inference_and_check(
     system_prompt,
     args,
 ):
+    assert args.n == 1, "Check does not support multiple samples"
     results = handler.load_existing_results(result_file)
     print(f"Loaded {len(results)} existing results.")
     train_data = handler.load_and_filter_dataset(
@@ -87,70 +139,25 @@ def perform_inference_and_check(
         if len(conversations) == 0:
             print("No more data to process")
             continue
-        elif args.use_ray:
-            config = load_config_from_path(args.ray_config)
-            config["model_id"] = args.model
-            engine_cfg = init_engine_from_config(config)
-            ds = ray.data.from_items([(idx, conv) for idx, conv in enumerate(conversations)])
-            if config["env_config"].get("num_replicas", 1) > 1 and config["env_config"].get("num_replicas", 1) > ds.num_blocks():
-                ds = ds.repartition(num_partitions=config["num_replicas"])
-            ds = EvalWorkload(dataset=ds, sampling_params={"n": args.n, "max_tokens": max_tokens, "temperature": temp})
-            pipeline = Pipeline(
-                engine_cfg,
-                env_config=EnvConfig(**config["env_config"]),
-            )
-            ds = pipeline(ds)
-            responses = ds.materialize()
-        elif args.model.startswith("openai"):
-            fetch_partial = partial(
-                fetch_response_openai, llm, args.model, max_tokens, temp
-            )
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=16) as e:
-                responses = list(e.map(fetch_partial, conversations))
-
-        else:
-            sampling_params = SamplingParams(max_tokens=max_tokens, temperature=temp)
-            responses = llm.chat(
-                messages=conversations, sampling_params=sampling_params, use_tqdm=True
-            )
+        responses = inference(llm, conversations, max_tokens, temp, args)
 
         total_correct = 0
         total_finish = 0
         with ProcessPoolExecutor(max_workers=32) as executor:
-            # future_to_task = {
-            #     executor.submit(handler.update_results, remaining_data[idx], response): idx
-            #     for idx, response in enumerate(responses)
-            # }
             future_to_task = {}
             token_usages = {}
-            for idx, response in enumerate(responses if llm is not None else responses.iter_rows()):
-                if args.use_ray:
-                    idx = response["index"]
-                    response_str = response["generated_text"].strip()
-                elif args.model.startswith("openai"):
-                    response_str = response.choices[0].message.content.strip()
-                else:
-                    response_str = response.outputs[0].text.strip()
+            for idx, response in enumerate(responses):
+                response_str = response.response.strip()
                 future_to_task[
                     executor.submit(
                         handler.update_results, remaining_data[idx], response_str
                     )
                 ] = idx
-                # print(f"Request output: {response}")
-                
-                if args.use_ray:
-                    token_usages[idx] = {
-                        "completion_tokens": response["num_generated_tokens"],
-                        "prompt_tokens": response["num_input_tokens"]
-                    }
-                elif args.model.startswith("openai"):
-                    token_usages[idx] = response.usage
-                else:
-                    token_usages[idx] = {
-                        "completion_tokens": len(response.outputs[0].token_ids),
-                        "prompt_tokens": len(response.prompt_token_ids),
-                    }
+                token_usages[idx] = {
+                    "completion_tokens": response.num_completion_tokens,
+                    "prompt_tokens": response.num_input_tokens,
+                }
 
             for future in tqdm(
                 as_completed(future_to_task),
@@ -175,14 +182,7 @@ def perform_inference_and_check(
 
                 results[problem_key]["responses"][str(temp)] = response_entry
 
-                if args.model.startswith("openai"):
-                    results[problem_key]["token_usages"][str(temp)] = {
-                        "completion_tokens": token_usages[idx].completion_tokens,
-                        "prompt_tokens": token_usages[idx].prompt_tokens,
-                    }
-                else:
-                    # TODO: vLLM model, can it do the same thing
-                    results[problem_key]["token_usages"][str(temp)] = token_usages[idx]
+                results[problem_key]["token_usages"][str(temp)] = token_usages[idx]
 
         print(f"Final acc: {total_correct}/{total_finish}")
         acc = round(total_correct / total_finish, 4) if total_finish > 0 else 0
@@ -356,83 +356,48 @@ def perform_inference_and_save(
         if len(conversations) == 0:
             print("No more data to process")
             continue
-        elif args.use_ray:
-            config = load_config_from_path(args.ray_config)
-            config["model_id"] = args.model
-            engine_cfg = init_engine_from_config(config)
-            ds = ray.data.from_items([(idx, conv) for idx, conv in enumerate(conversations)])
-            num_replicas = config["env_config"].get("num_replicas", 1)
-            if ds.count() < config["env_config"].get("batch_size", 1):
-                config["env_config"]["batch_size"] = math.ceil(ds.count() / num_replicas)
-            if num_replicas > 1 and num_replicas > ds.num_blocks():
-                ds = ds.repartition(num_partitions=num_replicas)
-            ds = EvalWorkload(dataset=ds, sampling_params={"n": args.n, "max_tokens": max_tokens, "temperature": temp})
-            pipeline = Pipeline(
-                engine_cfg,
-                env_config=EnvConfig(**config["env_config"]),
-            )
-            ds = pipeline(ds)
-            responses = ds.materialize()
-        elif args.model.startswith("openai"):
-            fetch_partial = partial(
-                fetch_response_openai, llm, args.model, max_tokens, temp
-            )
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=16) as e:
-                responses = list(e.map(fetch_partial, conversations))
-
-        else:
-            sampling_params = SamplingParams(
-                n=args.n, max_tokens=max_tokens, temperature=temp
-            )
-            responses = llm.chat(
-                messages=conversations, sampling_params=sampling_params, use_tqdm=True
-            )
+        responses = inference(llm, conversations, max_tokens, temp, args)
 
         completion_tokens = []
         prompt_tokens = []
-        for idx, response in enumerate(responses if not args.use_ray else responses.iter_rows()):
+        for idx, response in enumerate(responses):
             response_entries = []
             token_usages = []
             completion_token = 0
             for sample_idx in range(args.n):
-                if args.use_ray:
-                    text = response["generated_text"]
-                    content = text[sample_idx].strip() if not isinstance(text, str) else text.strip()
-                elif args.model.startswith("openai"):
-                    content = response.choices[0].message.content.strip()
+                if args.model.startswith("openai"):
+                    content = response.response.strip()
                 else:
-                    content = response.outputs[sample_idx].text.strip()
+                    content = response.response[sample_idx].strip()
                 response_entry = {
                     "content": content,
                     "correctness": None,
                     "reason": None,
                 }
                 response_entries.append(response_entry)
-                if args.use_ray:
-                    num_gen_tokens = response["num_generated_tokens"]
-                    token_usages.append({
-                        "completion_tokens": int(num_gen_tokens[sample_idx]) if not isinstance(num_gen_tokens, int) else num_gen_tokens,
-                        "prompt_tokens": response["num_input_tokens"]
-                    })
-                elif not args.model.startswith("openai"):
+                if args.model.startswith("openai"):
                     token_usages.append(
                         {
-                            "completion_tokens": len(
-                                response.outputs[sample_idx].token_ids
-                            ),
-                            "prompt_tokens": len(response.prompt_token_ids),
+                            "completion_tokens": response.num_completion_tokens,
+                            "prompt_tokens": response.num_input_tokens,
                         }
                     )
-                    completion_token += len(response.outputs[sample_idx].token_ids)
+                else:
+                    token_usages.append(
+                        {
+                            "completion_tokens": response.num_completion_tokens[
+                                sample_idx
+                            ],
+                            "prompt_tokens": response.num_input_tokens,
+                        }
+                    )
+                    completion_token += response.num_completion_tokens[sample_idx]
 
             completion_token /= args.n
-            prompt_token = len(response.prompt_token_ids if not args.use_ray else response["prompt_token_ids"])
+            prompt_token = response.num_input_tokens
             prompt_tokens.append(prompt_token)
             completion_tokens.append(completion_token)
 
-            if args.use_ray:
-                idx = response["index"] # ray code path doesn't get sorted responses so we need to grab index
             problem_key = remaining_data[idx][
                 handler.question_key
             ]  # can you use this idx
@@ -447,13 +412,7 @@ def perform_inference_and_save(
 
             results[problem_key]["responses"][str(temp)] = response_entries
 
-            if args.model.startswith("openai"):
-                results[problem_key]["token_usages"][str(temp)] = {
-                    "completion_tokens": response.usage.completion_tokens,
-                    "prompt_tokens": response.usage.prompt_tokens,
-                }
-            else:
-                results[problem_key]["token_usages"][str(temp)] = token_usages
+            results[problem_key]["token_usages"][str(temp)] = token_usages
 
     # Token usage summary put into another subdirectory
     result_dir, result_name = os.path.split(result_file)
@@ -566,15 +525,21 @@ def main():
         "--n", type=int, default=1, help="Number of samples generated per problem."
     )
     parser.add_argument("--seed", type=int, default=41, help="Random seed.")
-    parser.add_argument("--use_ray", action="store_true", help="Use ray for scaling inference.")
-    parser.add_argument("--ray_config", type=str, default="ray_configs/ray_config.yaml", help="Ray configuration file if using ray for scaling inference.")
+    parser.add_argument(
+        "--use_ray", action="store_true", help="Use ray for scaling inference."
+    )
+    parser.add_argument(
+        "--ray_config",
+        type=str,
+        default="ray_configs/ray_config.yaml",
+        help="Ray configuration file if using ray for scaling inference.",
+    )
 
     args = parser.parse_args()
     set_seed(args.seed)
 
     # use os to enable hf_transfer for model download
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
-    
 
     if args.task not in TASK_NAMES_TO_YAML:
         raise ValueError(
@@ -639,15 +604,24 @@ def main():
         if args.use_ray:
             # disable pyarrow warnings
             data_ctx = ray.data.DataContext.get_current()
-            data_ctx.enable_fallback_to_arrow_object_ext_type=True
+            data_ctx.enable_fallback_to_arrow_object_ext_type = True
             llm = None
         else:
-            llm = OpenAI() if args.model.startswith("openai") else LLM(model=args.model, tensor_parallel_size=args.tp)
+            llm = (
+                OpenAI()
+                if args.model.startswith("openai")
+                else LLM(model=args.model, tensor_parallel_size=args.tp)
+            )
         system_prompt = SYSTEM_PROMPT[args.model]
         if args.inference:
-            perform_inference_and_save(handler, temperatures, max_tokens, result_file, llm, system_prompt, args)
+            perform_inference_and_save(
+                handler, temperatures, max_tokens, result_file, llm, system_prompt, args
+            )
         else:
-            perform_inference_and_check(handler, temperatures, max_tokens, result_file, llm, system_prompt, args)
+            perform_inference_and_check(
+                handler, temperatures, max_tokens, result_file, llm, system_prompt, args
+            )
+
 
 if __name__ == "__main__":
     main()

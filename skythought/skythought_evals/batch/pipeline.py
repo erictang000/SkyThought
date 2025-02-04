@@ -1,4 +1,5 @@
 """Pipeline for batch processing large-scale LLM workloads."""
+
 import os
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
 
 logger = get_logger(__name__)
+
 
 class Pipeline:
     """Pipeline for batch processing large-scale LLM workloads.
@@ -108,7 +110,9 @@ class Pipeline:
             tokenizer_concurrency = self.num_replicas * 4
             ds = ds.map_batches(
                 self.workload.tokenizer_cls,
-                fn_constructor_kwargs=self.workload.tokenizer_constructor_kwargs(self.engine_initializer.model),
+                fn_constructor_kwargs=self.workload.tokenizer_constructor_kwargs(
+                    self.engine_initializer.model
+                ),
                 zero_copy_batch=True,
                 concurrency=(1, tokenizer_concurrency),
                 batch_size=self.env_config.batch_size,
@@ -141,7 +145,7 @@ class Pipeline:
         logger.info(msg)
         self.ds = ds
         return ds
-    
+
     def __call__(self, workload: WorkloadBase):
         self.workload: WorkloadBase = workload
         # Set the task to "embed" if sampling params are not given.
@@ -149,7 +153,7 @@ class Pipeline:
             "auto" if self.workload.sampling_params is not None else "embed"
         )
         return self.run(eager=False)
-    
+
     def run(
         self,
         dataset: Optional[Dataset] = None,
@@ -194,9 +198,9 @@ class Pipeline:
 
         ray_remote_args = {}
         if self.engine_initializer.accelerator_type:
-            ray_remote_args[
-                "accelerator_type"
-            ] = self.engine_initializer.accelerator_type
+            ray_remote_args["accelerator_type"] = (
+                self.engine_initializer.accelerator_type
+            )
         ray_remote_args.update({"runtime_env": {"env_vars": self.env_vars}})
 
         if dataset is not None:

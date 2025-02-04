@@ -1,4 +1,5 @@
 """The workload."""
+
 import math
 import os
 from dataclasses import dataclass, field
@@ -16,11 +17,13 @@ except ImportError:
     CheckpointConfig = None
     CheckpointBackend = None
 
+from pathlib import Path
+
+import yaml
+
 from .logging import get_logger
 from .tokenizer import ChatTemplateTokenizer
 from .utils import has_materialized
-from pathlib import Path
-import yaml
 
 logger = get_logger(__name__)
 
@@ -58,6 +61,7 @@ def read_parquet(path: str, max_batch_size: int) -> Dataset:
         override_num_blocks=num_blocks,
     )
 
+
 def load_config_from_path(config_path: str) -> Dict[str, Any]:
     if isinstance(config_path, str):
         config_path = Path(config_path)
@@ -68,6 +72,7 @@ def load_config_from_path(config_path: str) -> Dict[str, Any]:
 
     assert isinstance(config, dict)
     return config
+
 
 @dataclass
 class WorkloadBase:
@@ -237,9 +242,7 @@ class WorkloadBase:
             **output_row,
         }
 
-    def tokenizer_constructor_kwargs(
-        self, model: str
-    ):
+    def tokenizer_constructor_kwargs(self, model: str):
         """Return the keyword arguments for tokenizer constructor.
 
         Args:
@@ -272,11 +275,13 @@ class WorkloadBase:
         """
         return ds
 
+
 @dataclass
 class ChatWorkloadBase(WorkloadBase):
     """The base class for a chat workload."""
 
     tokenizer_cls: Any = ChatTemplateTokenizer
+
 
 @dataclass
 class EvalWorkload(ChatWorkloadBase):
@@ -288,6 +293,6 @@ class EvalWorkload(ChatWorkloadBase):
     def parse_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
         """Parse each row in the dataset to make them compatible with
         OpenAI chat API messages. Specifically, the output row should only
-        include a single key "messages" with type Dict[str, Union[str, List[Dict]]].      
+        include a single key "messages" with type Dict[str, Union[str, List[Dict]]].
         """
         return {"messages": row["item"][1], "index": row["item"][0]}

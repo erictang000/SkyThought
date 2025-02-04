@@ -1,4 +1,5 @@
 """The vLLM engine."""
+
 import asyncio
 import dataclasses
 import math
@@ -171,9 +172,7 @@ class AsyncLLMWrapper:
         # so we should set tokenize=False in .run() to avoid redundant tokenization
         # for better performance (although the impact should be minimal).
         assert request.prompt
-        llm_prompt = TextPrompt(
-            prompt=request.prompt
-        )
+        llm_prompt = TextPrompt(prompt=request.prompt)
 
         # Send the request to the LLM engine.
         stream = self.engine.generate(
@@ -348,12 +347,24 @@ class AsyncLLMPredictor(EngineBase):
                 metrics = {
                     k: [v] for k, v in dataclasses.asdict(output.metrics).items()
                 }
-            generated_tokens = [output.outputs[i].token_ids for i in range(len(output.outputs))]
-            num_generated_tokens = [len(output.outputs[i].token_ids) for i in range(len(output.outputs))]
+            generated_tokens = [
+                output.outputs[i].token_ids for i in range(len(output.outputs))
+            ]
+            num_generated_tokens = [
+                len(output.outputs[i].token_ids) for i in range(len(output.outputs))
+            ]
             output_data.update(
                 {
-                    "generated_tokens": [generated_tokens] if len(generated_tokens) > 1 else generated_tokens,
-                    "num_generated_tokens": [num_generated_tokens] if len(num_generated_tokens) > 1 else num_generated_tokens,
+                    "generated_tokens": (
+                        [generated_tokens]
+                        if len(generated_tokens) > 1
+                        else generated_tokens
+                    ),
+                    "num_generated_tokens": (
+                        [num_generated_tokens]
+                        if len(num_generated_tokens) > 1
+                        else num_generated_tokens
+                    ),
                     **metrics,
                 }
             )

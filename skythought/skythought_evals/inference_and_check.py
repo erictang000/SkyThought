@@ -72,7 +72,7 @@ def fetch_responses_ray(conversations, max_tokens, temp, args):
         config["env_config"]["batch_size"] = math.ceil(ds.count() / num_replicas)
     if num_replicas > 1 and num_replicas > ds.num_blocks():
         ds = ds.repartition(num_partitions=num_replicas)
-    ds = EvalWorkload(
+    workload = EvalWorkload(
         dataset=ds,
         sampling_params={"n": args.n, "max_tokens": max_tokens, "temperature": temp},
     )
@@ -80,7 +80,7 @@ def fetch_responses_ray(conversations, max_tokens, temp, args):
         engine_cfg,
         env_config=EnvConfig(**config["env_config"]),
     )
-    ds = pipeline(ds)
+    ds = pipeline(workload)
     responses = ds.materialize()
     return responses
 

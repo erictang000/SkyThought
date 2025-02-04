@@ -5,4 +5,3 @@ scipy
 datasets
 latex2sympy2
 pydantic
-hf_transfer

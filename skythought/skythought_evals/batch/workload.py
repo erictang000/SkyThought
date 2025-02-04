@@ -117,6 +117,17 @@ class EvalWorkload:
         )
         return ds.map(mapper_fn), num_blocks
 
+    def tokenizer_constructor_kwargs(self, model: str):
+        """Return the keyword arguments for tokenizer constructor.
+
+        Args:
+            model: The model name.
+
+        Returns:
+            The keyword arguments for tokenizer constructor.
+        """
+        return {"model": model}
+
     def parse_row_with_carryover_input(self, row: dict[str, Any]) -> dict[str, Any]:
         """Same as parse_row but carries over the input keys that are not in the output row.
 

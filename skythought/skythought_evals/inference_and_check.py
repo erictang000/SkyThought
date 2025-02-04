@@ -539,7 +539,7 @@ def main():
     set_seed(args.seed)
 
     # use os to enable hf_transfer for model download
-    if not os.environ.get("HF_HUB_ENABLE_HF_TRANSFER", None) in ["1", "True"]:
+    if os.environ.get("HF_HUB_ENABLE_HF_TRANSFER", None) not in ["1", "True"]:
         os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 
     if args.task not in TASK_NAMES_TO_YAML:
@@ -603,9 +603,6 @@ def main():
         return
     else:
         if args.use_ray:
-            # disable pyarrow warnings
-            data_ctx = ray.data.DataContext.get_current()
-            data_ctx.enable_fallback_to_arrow_object_ext_type = True
             llm = None
         else:
             llm = (

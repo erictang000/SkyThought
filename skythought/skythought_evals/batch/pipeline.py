@@ -13,7 +13,7 @@ from .engines import EngineInitializerBase, init_engine_from_config
 from .env_config import EnvConfig
 from .logging import get_logger
 from .tokenizer import Detokenizer
-from .workload import WorkloadBase
+from .workload import EvalWorkload
 
 if TYPE_CHECKING:
     from ray.util.placement_group import PlacementGroup
@@ -48,7 +48,7 @@ class Pipeline:
 
     @classmethod
     def from_config(
-        cls, engine_cfg: Union[Dict[str, Any], str], workload: WorkloadBase, **kwargs
+        cls, engine_cfg: Union[Dict[str, Any], str], workload: EvalWorkload, **kwargs
     ):
         """Initialize the pipeline from a configuration file or dictionary.
 
@@ -72,7 +72,6 @@ class Pipeline:
 
     def load(
         self,
-        ckpt_path: Optional[str] = None,
         repartition_by_batch_size: bool = False,
     ) -> Dataset:
         """Use the given workload to load and process the dataset,
@@ -80,8 +79,6 @@ class Pipeline:
         will be repartitioned based on the number of replicas and batch size.
 
         Args:
-            ckpt_path: The path to the checkpoint directory. If None, checkpointing
-                will be disabled.
             repartition_by_batch_size: Whether to repartition the dataset by the
                 batch size for fault tolerance granularity. You should enable
                 this when the dataset is not from parquet and checkpointing is
@@ -92,7 +89,6 @@ class Pipeline:
         """
         ds, num_blocks = self.workload.get_preprocessed_dataset(
             self.env_config.batch_size,
-            ckpt_path,
             repartition_by_batch_size,
         )
         if num_blocks is not None and num_blocks < self.num_replicas:
@@ -117,8 +113,6 @@ class Pipeline:
                 concurrency=(1, tokenizer_concurrency),
                 batch_size=self.env_config.batch_size,
             )
-
-        ds = self.workload.postproc_after_tokenize(ds)
 
         # If max tokens in prompt is not set in the workload and max_model_len is not set
         # in the engine, we need to materialize the dataset to get the maximum tokens in prompt.
@@ -146,8 +140,8 @@ class Pipeline:
         self.ds = ds
         return ds
 
-    def __call__(self, workload: WorkloadBase):
-        self.workload: WorkloadBase = workload
+    def __call__(self, workload: EvalWorkload):
+        self.workload: EvalWorkload = workload
         # Set the task to "embed" if sampling params are not given.
         self.task_type_str: str = (
             "auto" if self.workload.sampling_params is not None else "embed"
@@ -206,8 +200,7 @@ class Pipeline:
         if dataset is not None:
             self.ds = dataset
         elif self.ds is None:
-            ckpt_path = f"{output_path}_ckpt" if output_path is not None else None
-            self.load(ckpt_path, repartition_by_batch_size)
+            self.load(repartition_by_batch_size)
         assert self.ds is not None
 
         num_gpus = self.engine_initializer.num_gpus

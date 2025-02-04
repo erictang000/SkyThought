@@ -14,7 +14,7 @@ from ..utils import (
     download_model_from_hf,
     update_dict_recursive,
 )
-from ..workload import WorkloadBase
+from ..workload import EvalWorkload
 from .base import EngineBase
 
 
@@ -74,7 +74,7 @@ class EngineInitializerBase:
         """
         raise NotImplementedError
 
-    def get_engine_constructor_args(self, workload: WorkloadBase) -> Dict[str, Any]:
+    def get_engine_constructor_args(self, workload: EvalWorkload) -> Dict[str, Any]:
         """Get the engine constructor arguments.
 
         Args:
@@ -139,7 +139,7 @@ class vLLMEngineInitializer(EngineInitializerBase):
         """The maximum model length set by the engine."""
         return self.engine_kwargs.get("max_model_len", None)
 
-    def get_engine_constructor_args(self, workload: WorkloadBase):
+    def get_engine_constructor_args(self, workload: EvalWorkload):
         from vllm import PoolingParams, SamplingParams
         from vllm.config import PoolerConfig
 

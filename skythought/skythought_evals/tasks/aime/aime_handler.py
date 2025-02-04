@@ -11,6 +11,10 @@ class AIMETaskHandler(MathTaskHandler):
             return self.task_config.templating_parameters["sky_template"].format(
                 prompt=problem["problem"]
             )
+        elif "DeepSeek-R1" in MODEL_TO_NAME[model]:
+            return self.task_config.templating_parameters["r1_template"].format(
+                prompt=problem["problem"]
+            )
         else:
             return self.task_config.templating_parameters["regular_template"].format(
                 prompt=problem["problem"]

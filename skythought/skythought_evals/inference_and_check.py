@@ -91,6 +91,9 @@ def inference(llm, conversations, max_tokens, temp, args):
         responses = [
             Response.from_ray_response(response) for response in responses.iter_rows()
         ]
+        import copy
+
+        responses = copy.deepcopy(responses)
         responses = sorted(responses, key=lambda x: x.index)
     elif args.model.startswith("openai"):
         fetch_partial = partial(

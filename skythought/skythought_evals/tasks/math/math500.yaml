@@ -6,7 +6,6 @@ answer_key: answer
 dataset_split: test
 templating_parameters: 
   template: "Return your final response within \\boxed{{}}. {problem}"
-  r1_template: "Please reason step by step, and put your final answer within \\boxed{{}}. {prompt}"
 
 # optional. Not supported yet. 
 # fewshot_config:

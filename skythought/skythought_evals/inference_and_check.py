@@ -1,5 +1,6 @@
 import argparse
 import concurrent.futures
+import copy
 import json
 import math
 import os
@@ -91,8 +92,9 @@ def inference(llm, conversations, max_tokens, temp, args):
         responses = [
             Response.from_ray_response(response) for response in responses.iter_rows()
         ]
-        import copy
-
+        # TODO/NOTE: This deepcopy is needed to avoid a SIGSEV error related to object cleanup with the ray object store and
+        # the later use of ProcessPoolExecutor - see here: https://github.com/NovaSky-AI/SkyThought/pull/63#discussion_r1941899714
+        # revisit the underlying issue and remove the deepcopy if possible
         responses = copy.deepcopy(responses)
         responses = sorted(responses, key=lambda x: x.index)
     elif args.model.startswith("openai"):

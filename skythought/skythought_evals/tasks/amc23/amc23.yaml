@@ -10,3 +10,4 @@ answer_key: answer
 #   difficulty: easy
 templating_parameters: 
   template: "Return your final response within \\boxed{{}}. {problem}"
+  r1_template: "Please reason step by step, and put your final answer within \\boxed{{}}. {prompt}"

@@ -4,6 +4,7 @@ import copy
 import json
 import math
 import os
+from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 
@@ -25,7 +26,6 @@ from skythought_evals.util.model_utils import MODEL_TO_NAME, SYSTEM_PROMPT
 from skythought_evals.util.response import Response
 from tqdm import tqdm
 from vllm import LLM, SamplingParams
-from collections import defaultdict
 
 module_dir = os.path.dirname(os.path.abspath(__file__))
 TASK_NAMES_TO_YAML = get_tasks(os.path.join(module_dir, "tasks"))
@@ -328,21 +328,23 @@ def perform_check(handler: TaskHandler, temperatures, result_file, args):
         N = num_scores
         k = num_scores
 
-        actual_accuracy = sum([sum(sample) for sample in scores]) / (len(scores) * num_scores)
+        actual_accuracy = sum([sum(sample) for sample in scores]) / (
+            len(scores) * num_scores
+        )
         print(f"Actual accuracy: {actual_accuracy}")
         final_bon_scores = {}
 
         while k > 0:
             new_scores = []
             for sample in scores:
-                # calculate pass @ k 
+                # calculate pass @ k
                 num_correct = np.sum(sample)
                 pass_k = 1 - (math.comb(N - num_correct, k) / math.comb(N, k))
                 new_scores.append(pass_k)
-            final_bon_scores[k] = round(np.mean(new_scores)*100, 3)
+            final_bon_scores[k] = round(np.mean(new_scores) * 100, 3)
             k = k // 2
 
-        print(f"Final pass @ k:")
+        print("Final pass @ k:")
         for k, s in final_bon_scores.items():
             print(f"k: {k}, pass @ k: {s}")
         temp_correct = sum([any(x) for x in scores])

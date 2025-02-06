@@ -5,4 +5,4 @@ dataset_split: train
 question_key: question
 answer_key: final_answer
 templating_parameters:
-  template: "Return your final response within \\boxed{{}}. {question}"
+  template: "{question}"

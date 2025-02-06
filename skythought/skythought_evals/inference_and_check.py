@@ -613,7 +613,7 @@ def main():
             llm = (
                 OpenAI()
                 if args.model.startswith("openai")
-                else LLM(model=args.model, tensor_parallel_size=args.tp)
+                else LLM(model=args.model, tensor_parallel_size=args.tp, dtype="float32")
             )
         system_prompt = SYSTEM_PROMPT[args.model]
         if args.inference:
